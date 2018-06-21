@@ -12,12 +12,18 @@ from matplotlib import patches
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+from astroquery.vizier import Vizier
+from astropy import units as u
+from astropy.coordinates import SkyCoord
+from astropy.table import Table
+
 
 from . import PACKAGEDIR
 from .lightcurve import KeplerLightCurve, LightCurve
-from .prf import KeplerPRF
+from .prf import SimpleKeplerPRF
 from .utils import KeplerQualityFlags, plot_image, bkjd_to_astropy_time
 from .mast import download_kepler_products
+
 
 
 __all__ = ['KeplerTargetPixelFile']
@@ -144,6 +150,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         self.quality_bitmask = quality_bitmask
         self.quality_mask = self._quality_mask(quality_bitmask)
 
+
     @staticmethod
     def from_archive(target, cadence='long', quarter=None, month=None,
                      campaign=None, radius=1., targetlimit=1, **kwargs):
@@ -189,6 +196,106 @@ class KeplerTargetPixelFile(TargetPixelFile):
     def __repr__(self):
         return('KeplerTargetPixelFile Object (ID: {})'.format(self.keplerid))
 
+
+    def query_catalog(self, catalog=None, radius=0.5):
+        """
+        Load tpf file to find field stars within the tpf.
+
+        Returns a crossmatched table of stars that are within the tpf file
+          given a tpf mission (either KIC or EPIC).
+
+        Parameters
+        -----------
+        catalog: string
+            Indicate catalog assigned for mission. If Kepler, catalog will be KIC
+            if K2 catalog is EPIC.
+        radius: float
+            Radius of cone search centered on the target in arcminutes.
+            Default radius is 0.5 arcmin.
+
+        Returns
+        -------
+        ID : astropy.table.column (KIC & EPIC)
+            Catalog ID from catalog.
+        RAJ200: astropy.table.column (KIC & EPIC)
+            Right ascension [degrees]
+        DEJ2000: astropy.table.column (KIC & EPIC)
+            Declination [deg]
+        pmRA: astropy.table.column (KIC & EPIC)
+            Proper motion for right ascension [mas/year]
+        e_pmRA: astropy.table.column (KIC & EPIC)
+            Error proper motion for Right ascension [mas/year]
+        pmDEC: astropy.table.column (KIC & EPIC)
+            Proper motion for declination [mas/year]
+        e_pmDEC: astropy.table.column (EPIC)
+            Error proper motion for declination [mas/year]
+        Kpmag: astropy.table.column (KIC & EPIC)
+            Magnitude in Kepler band [mag]
+        """
+
+        if catalog is None:
+            if self.mission == 'Kepler':
+                catalog = 'KIC'
+            elif self.mission == 'K2':
+                catalog = 'EPIC'
+            else:
+                log.error('Please provide a catalog.')
+
+        if catalog is "Gaia":
+            log.warn('Gaia RAs and Decs are at EPOC 2015.5. These RA/Decs have not been corrected.')
+
+        # Vizier id's
+        ID = {"KIC":
+                    {'vizier':"V/133/kic",
+                     'parameters':["KIC", "RAJ2000", "DEJ2000", "pmRA", "pmDE", "kepmag"]},
+               "EPIC":
+               {'vizier':"IV/34/epic",
+                'parameters':["ID", "RAJ2000", "DEJ2000", "pmRA", "pmDEC", "e_pmRA", "e_pmDEC", "Kpmag"]},
+               "Gaia":
+               {'vizier':"I/345/gaia2",
+               'parameters':["DR2Name", "RA_ICRS", "DE_ICRS", "pmRA", "pmDE", "e_pmRA", "e_pmDE", "Gmag"]}}
+
+        # identifies catalog
+        viz_id = ID[catalog]['vizier']
+        pars = ID[catalog]['parameters']
+
+        #Skycoord the centre of target
+        cent = SkyCoord(ra=self.ra, dec=self.dec, frame='icrs', unit=(u.deg, u.deg))
+
+        # Choose columns from Vizier
+        v = Vizier(catalog=[viz_id], columns=pars)
+        # query around cent. with radius
+        result = v.query_region(cent, radius=radius*u.arcmin, catalog=viz_id)
+
+        # Rename names in KIC for consistency with EPIC
+        result[viz_id]['KIC'].name = 'ID'
+        result[viz_id]['pmDE'].name = 'pmDEC'
+        result[viz_id]['kepmag'].name = 'Kpmag'
+
+        # Queried stats
+        data = result[viz_id]
+
+        # Load ra & dec of all tpf pixels
+        gc_ra, gc_dec = self.get_coordinates(cadence='all')
+
+        # Reduce calculation for astroy seperation
+        c1 = np.asarray([gc_ra.ravel(), gc_dec.ravel()])
+        co = np.round(c1, decimals=5)
+
+        # Return unique pairs
+        pairs_gc = (np.unique(co, axis=1))
+
+        # Make pairs_gc into SkyCoord
+        sky_pairs_gc = SkyCoord(ra=pairs_gc[0]*u.deg, dec=pairs_gc[1]*u.deg, frame='icrs', unit=(u.deg, u.deg))
+        # Make pairs in sky_data
+        sky_data = SkyCoord(ra=data['RAJ2000'], dec=data['DEJ2000'], frame='icrs', unit=(u.deg, u.deg))
+
+        for i in range (0, len(data)):
+            # seperation between tpf pixels and queried stats
+            s = sky_pairs_gc.separation(sky_data[i])
+            store = np.any(s.arcsec<=11)
+
+
     @property
     def hdu(self):
         return self._hdu
@@ -232,8 +339,8 @@ class KeplerTargetPixelFile(TargetPixelFile):
         prf : instance of SimpleKeplerPRF
         """
 
-        return KeplerPRF(channel=self.channel, shape=self.shape[1:],
-                         column=self.column, row=self.row)
+        return SimpleKeplerPRF(channel=self.channel, shape=self.shape[1:],
+                               column=self.column, row=self.row)
 
     @property
     def wcs(self):
@@ -286,17 +393,16 @@ class KeplerTargetPixelFile(TargetPixelFile):
         """
         w = self.wcs
         X, Y = np.meshgrid(np.arange(self.shape[2]), np.arange(self.shape[1]))
-        pos_corr1_pix, pos_corr2_pix = self.hdu[1].data['POS_CORR1'], self.hdu[1].data['POS_CORR2']
+        pos_corr1_pix, pos_corr2_pix = np.copy(self.hdu[1].data['POS_CORR1']), np.copy(self.hdu[1].data['POS_CORR2'])
 
         # We zero POS_CORR* when the values are NaN or make no sense (>50px)
         with warnings.catch_warnings():  # Comparing NaNs to numbers is OK here
             warnings.simplefilter("ignore", RuntimeWarning)
             bad = np.any([~np.isfinite(pos_corr1_pix),
                           ~np.isfinite(pos_corr2_pix),
-                          np.abs(pos_corr1_pix) < 50,
-                          np.abs(pos_corr2_pix) < 50], axis=0)
+                          np.abs(pos_corr1_pix - np.nanmedian(pos_corr1_pix)) > 50,
+                          np.abs(pos_corr2_pix - np.nanmedian(pos_corr2_pix)) > 50], axis=0)
         pos_corr1_pix[bad], pos_corr2_pix[bad] = 0, 0
-
         # Add in POSCORRs
         X = (np.atleast_3d(X).transpose([2, 0, 1]) +
              np.atleast_3d(pos_corr1_pix).transpose([1, 2, 0]))
@@ -311,6 +417,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         if cadence is not 'all':
             return ra[cadence], dec[cadence]
         return ra, dec
+
 
     @property
     def keplerid(self):
