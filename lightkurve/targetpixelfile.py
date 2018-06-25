@@ -21,7 +21,7 @@ from astropy.table import Table
 from . import PACKAGEDIR
 from .lightcurve import KeplerLightCurve, LightCurve
 from .prf import SimpleKeplerPRF
-from .utils import KeplerQualityFlags, plot_image, bkjd_to_astropy_time
+from .utils import KeplerQualityFlags, plot_image, bkjd_to_astropy_time, query_catalog
 from .mast import download_kepler_products
 
 
@@ -197,24 +197,28 @@ class KeplerTargetPixelFile(TargetPixelFile):
         return('KeplerTargetPixelFile Object (ID: {})'.format(self.keplerid))
 
 
-    def query_catalog(self, catalog=None, radius=0.5):
+    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=3):
         """
-        Load tpf file to find field stars within the tpf.
-
-        Returns a crossmatched table of stars that are within the tpf file
-          given a tpf mission (either KIC or EPIC).
+        Returns a crossmatched table of stars that are centered on the target
+        of the tpf file. Current catalog supported are KIC, EPIC and Gaia DR2.
 
         Parameters
         -----------
         catalog: string
             Indicate catalog assigned for mission. If Kepler, catalog will be KIC
             if K2 catalog is EPIC.
-        radius: float
-            Radius of cone search centered on the target in arcminutes.
-            Default radius is 0.5 arcmin.
+        magnitude_limit : int or float
+            Limit the returned magnitudes to only stars brighter than magnitude_limit.
+            Default 18.
+        dist_tolerance: float
+            Tolerance for source matching in pixels. Sources that fall within this
+            tolerance of pixels in the KeplerTargetPixelFile will be returned in the result.
+            Default is 3 pixels (12 arcsec).
 
         Returns
         -------
+        result : astropy.table
+            Astropy table with the following columns
         ID : astropy.table.column (KIC & EPIC)
             Catalog ID from catalog.
         RAJ200: astropy.table.column (KIC & EPIC)
@@ -223,12 +227,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
             Declination [deg]
         pmRA: astropy.table.column (KIC & EPIC)
             Proper motion for right ascension [mas/year]
-        e_pmRA: astropy.table.column (KIC & EPIC)
-            Error proper motion for Right ascension [mas/year]
         pmDEC: astropy.table.column (KIC & EPIC)
-            Proper motion for declination [mas/year]
-        e_pmDEC: astropy.table.column (EPIC)
-            Error proper motion for declination [mas/year]
         Kpmag: astropy.table.column (KIC & EPIC)
             Magnitude in Kepler band [mag]
         """
@@ -241,60 +240,43 @@ class KeplerTargetPixelFile(TargetPixelFile):
             else:
                 log.error('Please provide a catalog.')
 
-        if catalog is "Gaia":
-            log.warn('Gaia RAs and Decs are at EPOC 2015.5. These RA/Decs have not been corrected.')
-
-        # Vizier id's
-        ID = {"KIC":
-                    {'vizier':"V/133/kic",
-                     'parameters':["KIC", "RAJ2000", "DEJ2000", "pmRA", "pmDE", "kepmag"]},
-               "EPIC":
-               {'vizier':"IV/34/epic",
-                'parameters':["ID", "RAJ2000", "DEJ2000", "pmRA", "pmDEC", "e_pmRA", "e_pmDEC", "Kpmag"]},
-               "Gaia":
-               {'vizier':"I/345/gaia2",
-               'parameters':["DR2Name", "RA_ICRS", "DE_ICRS", "pmRA", "pmDE", "e_pmRA", "e_pmDE", "Gmag"]}}
-
-        # identifies catalog
-        viz_id = ID[catalog]['vizier']
-        pars = ID[catalog]['parameters']
-
         #Skycoord the centre of target
         cent = SkyCoord(ra=self.ra, dec=self.dec, frame='icrs', unit=(u.deg, u.deg))
 
-        # Choose columns from Vizier
-        v = Vizier(catalog=[viz_id], columns=pars)
-        # query around cent. with radius
-        result = v.query_region(cent, radius=radius*u.arcmin, catalog=viz_id)
+        #Find the size of the TPF
+        radius = np.max(self.flux.shape[1:]) * 4 * u.arcsecond
 
-        # Rename names in KIC for consistency with EPIC
-        result[viz_id]['KIC'].name = 'ID'
-        result[viz_id]['pmDE'].name = 'pmDEC'
-        result[viz_id]['kepmag'].name = 'Kpmag'
-
-        # Queried stats
-        data = result[viz_id]
+        # query around centre with radius
+        data = query_catalog(cent, radius=radius, catalog=catalog)
 
         # Load ra & dec of all tpf pixels
-        gc_ra, gc_dec = self.get_coordinates(cadence='all')
+        pixels_ra, pixels_dec = self.get_coordinates(cadence='all')
 
         # Reduce calculation for astroy seperation
-        c1 = np.asarray([gc_ra.ravel(), gc_dec.ravel()])
-        co = np.round(c1, decimals=5)
+        pixel_radec = np.asarray([pixels_ra.ravel(), pixels_dec.ravel()])
+        pixel_radec = np.round(pixel_radec, decimals=5)
 
         # Return unique pairs
-        pairs_gc = (np.unique(co, axis=1))
+        pixel_pairs = (np.unique(pixel_radec, axis=1))
 
-        # Make pairs_gc into SkyCoord
-        sky_pairs_gc = SkyCoord(ra=pairs_gc[0]*u.deg, dec=pairs_gc[1]*u.deg, frame='icrs', unit=(u.deg, u.deg))
-        # Make pairs in sky_data
-        sky_data = SkyCoord(ra=data['RAJ2000'], dec=data['DEJ2000'], frame='icrs', unit=(u.deg, u.deg))
+        # Make pixel pairs into SkyCoord
+        sky_pixel_pairs = SkyCoord(ra=pixel_pairs[0]*u.deg, dec=pixel_pairs[1]*u.deg, frame='icrs', unit=(u.deg, u.deg))
+        # Make pairs in sky_sources
+        sky_sources = SkyCoord(ra=data['RA'], dec=data['Dec'], frame='icrs', unit=(u.deg, u.deg))
 
-        for i in range (0, len(data)):
-            # seperation between tpf pixels and queried stats
-            s = sky_pairs_gc.separation(sky_data[i])
-            store = np.any(s.arcsec<=11)
+        seperation_mask = []
+        for i in range (len(data)):
+            s = sky_pixel_pairs.separation(sky_sources[i])  # Estimate seperation
+            seperation = np.any(s.arcsec <= dist_tolerance)
+            seperation_mask.append(seperation)
 
+
+        sep_mask = np.array(seperation_mask, dtype=bool)
+
+        # Make sure it's bright enough
+        sep_mask &= data['mag'] < magnitude_limit
+
+        return data[sep_mask]
 
     @property
     def hdu(self):
