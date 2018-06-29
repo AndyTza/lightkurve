@@ -15,6 +15,7 @@ from tqdm import tqdm
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 
+
 from . import PACKAGEDIR
 from .lightcurve import KeplerLightCurve, LightCurve
 from .prf import SimpleKeplerPRF
