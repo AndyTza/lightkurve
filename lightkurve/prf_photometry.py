@@ -49,6 +49,17 @@ class StarPrior(object):
                 self.flux.evaluate(flux))
         return logp
 
+    def get_star_prior(self):
+
+        field_stars = self.get_sources()
+
+        # Apply sky-to-pixel transformations
+        column_pos, row_pos = self.wcs.wcs_world2pix(field_stars['ra'], field_stars['dec'], 1)
+        column_pos, row_pos = column_pos + self.column, row_pos + self.row
+
+
+
+
 
 class BackgroundPrior():
     """Container class to capture a user's beliefs about the background flux.
