@@ -195,7 +195,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         return('KeplerTargetPixelFile Object (ID: {})'.format(self.keplerid))
 
 
-    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=3):
+    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=2):
         """
         Returns a table of stars that are centered on the target
         of the tpf file. Current catalog supported are KIC, EPIC and Gaia DR2.
@@ -209,7 +209,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
             Limit the returned magnitudes to only stars brighter than magnitude_limit.
             Default 18 for both Kepmag and Gmag.
         dist_tolerance: float
-            Maximum distance (in arcseconds) a source may be seperated from the edge
+            Maximum distance (in arcseconds) a source may be separated from the edge
             of the target pixel file.
 
         Returns
@@ -217,11 +217,14 @@ class KeplerTargetPixelFile(TargetPixelFile):
         result : astropy.table
             Astropy table with the following columns
             ID : Catalog ID from catalog.
-            RAJ200: Right ascension [degrees]
-            DEJ2000: Declination [degrees]
+            RAJ200: Right ascension [degrees] (KIC & EPIC)
+            DEJ2000: Declination [degrees]    (KIC & EPIC)
+            RAJ2015.5: Right ascension [degrees] (Gaia)
+            DEJ2015.5: Declination [degrees] (Gaia)
             pmRA: Proper motion for right ascension [mas/year]
             pmDEC: Proper motion for declination [mas/year]
-            Kpmag: Magnitude in Kepler band [mag]
+            Kpmag: Magnitude in Kepler band [mag] (KIC & EPIC)
+            Gmag: Magnitude in Gaia band [mag]  (Gaia)
 
         """
 
@@ -233,38 +236,37 @@ class KeplerTargetPixelFile(TargetPixelFile):
             else:
                 raise ValueError('Please provide a catalog.')
 
+        if dist_tolerance < 2:
+            log.warning('Distance tolerance is too low')
+
         #Skycoord the centre of target
         cent = SkyCoord(ra=self.ra, dec=self.dec, frame='icrs', unit=(u.deg, u.deg))
 
         #Find the size of the TPF
-        radius = (np.max(self.flux.shape[1:2]) * 4) / 60.0
+        radius = ((np.max(self.flux.shape[1:2]) * 4) + dist_tolerance)/ 60.0
 
         # query around centre with radius
         data = query_catalog(cent, radius=radius, catalog=catalog)
 
         # Find where nans are in cadence
-        find_nans = ~np.isnan(self.flux[4])
+        tpf_mask = np.any(np.isfinite(self.flux), axis=0)
+
         # Load ra & dec of all tpf pixels
-        pixels_ra, pixels_dec = self.get_coordinates(cadence=5)
-        pixels_ra, pixels_dec = pixels_ra[find_nans], pixels_dec[find_nans]
+        pixels_ra, pixels_dec = self.get_coordinates(cadence=int(len(self.cadenceno)/2))
 
-        # Reduce calculation for astroy separation
-        pixel_radec = np.asarray([pixels_ra.ravel(), pixels_dec.ravel()])
-        pixel_radec = np.round(pixel_radec, decimals=5)
-
-        # Return unique pairs
-        pixel_pairs = (np.unique(pixel_radec, axis=1))
+        # Load pixel ra, dec with no nans
+        pixels_radec = np.asarray([pixels_ra[tpf_mask].ravel(), pixels_dec[tpf_mask].ravel()])
 
         # Make pixel pairs into SkyCoord
-        sky_pixel_pairs = SkyCoord(ra=pixel_pairs[0]*u.deg, dec=pixel_pairs[1]*u.deg, frame='icrs', unit=(u.deg, u.deg))
+        sky_pixel_pairs = SkyCoord(ra=pixels_radec[0], dec=pixels_radec[1], frame='icrs', unit=(u.deg, u.deg))
         # Make pairs in sky_sources
         sky_sources = SkyCoord(ra=data['ra'], dec=data['dec'], frame='icrs', unit=(u.deg, u.deg))
 
-        separation_mask = []
-        for i in range (len(data)):
-            s = sky_pixel_pairs.separation(sky_sources[i])  # Estimate separation
-            separation = np.any(s.arcmin <= dist_tolerance)
-            separation_mask.append(separation)
+        separation_mask = np.zeros(len(data), dtype=bool)
+        for idx in range (len(data)):
+            s = sky_pixel_pairs.separation(sky_sources[idx])  # Estimate separation
+            separation = np.any(s.arcsec <= dist_tolerance)
+            separation_mask[idx] = separation
 
         sep_mask = np.array(separation_mask, dtype=bool)
 
