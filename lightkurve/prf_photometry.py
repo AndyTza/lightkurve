@@ -9,7 +9,7 @@ from oktopus import GaussianPrior, UniformPrior, PoissonPosterior
 from oktopus.posterior import PoissonPosterior
 
 from .prf import KeplerPRF
-from .utils import plot_image
+from .utils import plot_image, kpmag_to_flux
 
 
 __all__ = ['StarPrior', 'FocusPrior', 'MotionPrior',
@@ -49,31 +49,24 @@ class StarPrior(object):
                 self.flux.evaluate(flux))
         return logp
 
-    def mag_to_flux(kpmag):
-        """Evaluate the flux of a star given its flux"""
-
-        # Preliminary zero-point calibrations from Pre-Flight Estimates
-        f_12 = 1.74 * 10**(5)
-        f_kep = 10**(-4*(kpmag-12)) * f_12
-        return (f_kep)
-
     def get_star_prior(self):
         """ Returns the prior information of all stars identified
         in the tpf field.
         """
 
         field_stars = self.get_sources()
+
         # Apply sky-to-pixel transformations
         column_pos, row_pos = self.wcs.wcs_world2pix(field_stars['ra'], field_stars['dec'], 1)
         column_pos, row_pos = column_pos + self.column, row_pos + self.row
         # Return flux of each magnitude
-        star_flux = StarPrior.mag_to_flux(field_stars['mag'])
+        star_flux = kpmag_to_flux(field_stars['mag'])
         # Return Id's of each star
         star_ID = field_stars['id']
 
-        test = StarPrior(column_pos, row_pos, star_flux, star_ID )
+        star_info = StarPrior(star_ID, column_pos, row_pos, star_ID )
 
-        return (test)
+        return star_info
         #return StarPrior.evaluate(self, column_pos, row_pos, star_flux)
 
 

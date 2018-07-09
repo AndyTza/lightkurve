@@ -365,3 +365,14 @@ def query_catalog(coordinate, catalog="KIC", radius=0.5):
             result[viz_id].rename_column(result[viz_id].colnames[i], new_pars[i])
 
         return (result[viz_id])
+
+def kpmag_to_flux(kpmag, photometry='SAP'):
+    if photometry == 'SAP':
+        return (10**(-0.4*(kpmag - 12)) * (25.08396959661831)) # Zero-point
+    elif photometry == 'PDC':
+        return (10**(-0.4*(kpmag - 12)) * (23.84589735002767))
+
+def gmag_to_flux(gmag):
+    """ Returns the corresponding flux depending on the zero-point of Gaia DR2 """
+
+    return (10**(-0.4*(gmag - 12)) * (25.72093144556945))

@@ -195,7 +195,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         return('KeplerTargetPixelFile Object (ID: {})'.format(self.keplerid))
 
 
-    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=2):
+    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=3):
         """
         Returns a table of stars that are centered on the target
         of the tpf file. Current catalog supported are KIC, EPIC and Gaia DR2.
