@@ -49,26 +49,6 @@ class StarPrior(object):
                 self.flux.evaluate(flux))
         return logp
 
-    def get_star_prior(self):
-        """ Returns the prior information of all stars identified
-        in the tpf field.
-        """
-
-        field_stars = self.get_sources()
-
-        # Apply sky-to-pixel transformations
-        column_pos, row_pos = self.wcs.wcs_world2pix(field_stars['ra'], field_stars['dec'], 1)
-        column_pos, row_pos = column_pos + self.column, row_pos + self.row
-        # Return flux of each magnitude
-        star_flux = kpmag_to_flux(field_stars['mag'])
-        # Return Id's of each star
-        star_ID = field_stars['id']
-
-        star_info = StarPrior(star_ID, column_pos, row_pos, star_ID )
-
-        return star_info
-        #return StarPrior.evaluate(self, column_pos, row_pos, star_flux)
-
 
 
 class BackgroundPrior():
