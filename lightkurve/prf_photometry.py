@@ -1,5 +1,4 @@
 from __future__ import division, print_function
-
 import logging
 from matplotlib import pyplot as plt
 import numpy as np
@@ -7,6 +6,7 @@ from tqdm import tqdm
 
 from oktopus import GaussianPrior, UniformPrior, PoissonPosterior
 from oktopus.posterior import PoissonPosterior
+from lightkurve import KeplerTargetPixelFile
 
 from .prf import KeplerPRF
 from .utils import plot_image, kpmag_to_flux
@@ -39,6 +39,7 @@ class StarPrior(object):
     def __repr__(self):
         return ('<StarPrior (ID: {}): col={}, row={}, flux={}>'
                 ''.format(self.targetid, self.col, self.row, self.flux))
+
 
     def evaluate(self, col, row, flux):
         """Evaluate the prior probability of a star of a given flux being at
@@ -195,19 +196,19 @@ class SceneModelParameters():
         self.focus = focus
         self.motion = motion
 
-    def __repr__(self):
-        out = super(SceneModelParameters, self).__repr__() + '\n'
-        out += '  Stars:\n'+''.join(['    {}\n'.format(star) for star in self.stars])
-        out += '  Background:\n    {}\n'.format(self.background)
-        out += '  Focus:\n    {}\n'.format(self.focus)
-        out += '  Motion:\n    {}\n'.format(self.motion)
-        if 'residual_image' in vars(self):
-            out += '  Residual image:\n    {}'.format(self.residual_image[0][0:4])[:-1]
-            out += '...\n'
-        if 'predicted_image' in vars(self):
-            out += '  Predicted image:\n    {}'.format(self.predicted_image[0][0:4])[:-1]
-            out += '...\n'
-        return out
+#    def __repr__(self):
+#        out = super(SceneModelParameters, self).__repr__() + '\n'
+#        out += '  Stars:\n'+''.join(['    {}\n'.format(star) for star in self.stars])
+#        out += '  Background:\n    {}\n'.format(self.background)
+#        out += '  Focus:\n    {}\n'.format(self.focus)
+#        out += '  Motion:\n    {}\n'.format(self.motion)
+#        if 'residual_image' in vars(self):
+#            out += '  Residual image:\n    {}'.format(self.residual_image[0][0:4])[:-1]
+#            out += '...\n'
+#        if 'predicted_image' in vars(self):
+#            out += '  Predicted image:\n    {}'.format(self.predicted_image[0][0:4])[:-1]
+#            out += '...\n'
+#        return out
 
     def to_array(self):
         """Converts the free parameters held by this class to an array of size (n,),
@@ -550,16 +551,18 @@ class PRFPhotometry():
 
 
 def _example():
+
     tpf = KeplerTargetPixelFile.from_archive(8462852, quarter=16, quality_bitmask='hardest')
     bgflux = np.nanpercentile(tpf.flux[0], 10)
     maxflux = np.nansum(tpf.flux, axis=(1, 2)).max()
 
     # First, set up a simple scene model with one star and no motion or focus changes
     col, row = np.nanmedian(tpf.centroids(), axis=1)
-    star_prior = StarPrior(col=GaussianPrior(mean=col[0], var=2**2),
-                           row=GaussianPrior(mean=row[0], var=2**2),
+    star_prior = StarPrior(col=GaussianPrior(mean=col, var=2**2),
+                           row=GaussianPrior(mean=row, var=2**2),
                            flux=UniformPrior(lb=0, ub=maxflux),
                            targetid=tpf.keplerid)
+
     model = SceneModel(star_priors=[star_prior],
                        background_prior=BackgroundPrior(),
                        focus_prior=FocusPrior(scale_col=GaussianPrior(mean=1, var=0.0001),
@@ -567,10 +570,10 @@ def _example():
                                               rotation_angle=UniformPrior(lb=-3.1415, ub=3.1415)),
                        motion_prior=MotionPrior(shift_col=GaussianPrior(mean=0., var=0.01),
                                                 shift_row=GaussianPrior(mean=0., var=0.01)),
-                       prfmodel=tpf.get_prf_model(),
+                       prfmodel=KeplerPRF(tpf.channel, tpf.flux.shape[1:], tpf.column, tpf.row),
                        fit_background=True,
-                       fit_focus=True,
-                       fit_motion=True)
+                       fit_focus=False,
+                       fit_motion=False)
 
     pp = PRFPhotometry(model)
     pp.run(tpf.flux[1650:1850], pos_corr1=tpf.pos_corr1[1650:1850], pos_corr2=tpf.pos_corr2[1650:1850])

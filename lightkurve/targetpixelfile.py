@@ -283,12 +283,15 @@ class KeplerTargetPixelFile(TargetPixelFile):
         # Apply sky-to-pixel transformations
         column_pos, row_pos = self.wcs.wcs_world2pix(field_stars['ra'], field_stars['dec'], 1)
         column_pos, row_pos = column_pos + self.column, row_pos + self.row
+
         # Return flux of each magnitude
-        star_flux = kpmag_to_flux(field_stars['mag'])
+        star_flux = kpmag_to_flux(field_stars['mag'], photometry='SAP')
         # Return Id's of each star
         star_ID = field_stars['id']
 
         star_prior = {'col':column_pos, 'row':row_pos, 'flux':star_flux, 'id':star_ID}
+
+        #return (column_pos, row_pos, star_flux, star_ID)
 
         return star_prior
 

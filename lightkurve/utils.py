@@ -372,12 +372,14 @@ def kpmag_to_flux(kpmag, photometry='SAP'):
     """
 
     if photometry == 'SAP':
-        return (10**(-0.4*(kpmag - 12)) * (25.08396959661831)) # Zero-point
+        Zp = 25.08396959661831
+        return  10**((Zp-kpmag)/2.5)
     elif photometry == 'PDC':
-        return (10**(-0.4*(kpmag - 12)) * (23.84589735002767))
+        Zp = 23.84589735002767
+        return  10**((Zp-kpmag)/2.5)
 
 def gmag_to_flux(gmag):
     """ Returns the corresponding flux depending on the zero-point of Gaia DR2.
     """
-
-    return (10**(-0.4*(gmag - 12)) * (25.72093144556945))
+    Zp = 25.72093144556945
+    return np.exp(0.921034*(Zp-kpmag))
