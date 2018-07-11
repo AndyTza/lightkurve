@@ -374,7 +374,7 @@ def kpmag_to_flux(kpmag, photometry='SAP'):
     if photometry == 'SAP':
         Zp = 25.08396959661831
         return  10**((Zp-kpmag)/2.5)
-    elif photometry == 'PDC':
+    elif photometry == 'PDC': # Don't currently need
         Zp = 23.84589735002767
         return  10**((Zp-kpmag)/2.5)
 
