@@ -289,6 +289,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         star_ID = field_stars['id']
 
         star_array = np.ndarray(shape=(len(field_stars),4), dtype=float)
+
         # Assign variables to array
         star_array[:, 0] = col+self.column
         star_array[:, 1] = row+self.row
