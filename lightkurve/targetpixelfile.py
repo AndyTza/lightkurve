@@ -310,7 +310,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
             # Assign variables to array
             star_array[:, 0] = col+self.column
             star_array[:, 1] = row+self.row
-            star_array[:, 2] = star_flux
+            star_array[:, 2] = star_fluxo
             star_array[:, 3] = star_ID
 
             return star_array
