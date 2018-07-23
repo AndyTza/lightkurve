@@ -366,21 +366,14 @@ def query_catalog(coordinate, catalog="KIC", radius=0.5):
 
         return (result[viz_id])
 
-def kpmag_to_flux(kpmag, photometry='SAP'):
+def kpmag_to_flux(kpmag):
     """
     Returns the corresponding flux depending on the zero-point of KIC & EPIC catalogs.
     """
+    alpha = 0.874 #Preliminary result
+    ZP = 4471538321.252 # preliminary results
 
-    if photometry == 'SAP':
-        Zp = -25.084
-        return  10**(-1*(kpmag+Zp/2.5))
+    exponent = -0.4*(alpha*kpmag)
 
-    #elif photometry == 'PDC': # Don't currently need
-        #Zp = 23.84589735002767
-        #return  10**((Zp-kpmag)/2.5)
-
-def gmag_to_flux(gmag):
-    """ Returns the corresponding flux depending on the zero-point of Gaia DR2.
-    """
-    Zp = 25.72093144556945
-    return np.exp(0.921034*(Zp-kpmag))
+    flux = ZP * 10**(exponent)
+    return flux
