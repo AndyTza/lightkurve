@@ -18,6 +18,8 @@ from .lightcurve import KeplerLightCurve, TessLightCurve, LightCurve
 from .prf import KeplerPRF
 from .utils import KeplerQualityFlags, plot_image, bkjd_to_astropy_time, btjd_to_astropy_time
 from .mast import download_kepler_products
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 
 
 __all__ = ['KeplerTargetPixelFile', 'TessTargetPixelFile']
@@ -775,6 +777,87 @@ class KeplerTargetPixelFile(TargetPixelFile):
             bitmask = KeplerQualityFlags.OPTIONS[bitmask]
         return (self.hdu[1].data['QUALITY'] & bitmask) == 0
 
+    def get_sources(self, catalog=None, magnitude_limit=18, dist_tolerance=2):
+        """
+        Returns a table of stars that are centered on the target
+        of the tpf file. Current catalog supported are KIC, EPIC and Gaia DR2.
+
+        Parameters
+        -----------
+        catalog: 'KIC', 'EPIC' or 'Gaia'
+            Catalog to query. For Kepler target pixel files the default is 'KIC',
+            for K2 target pixel files the default is 'EPIC'.
+        magnitude_limit : int or float
+            Limit the returned magnitudes to only stars brighter than magnitude_limit.
+            Default 18 for both Kepmag and Gmag.
+        dist_tolerance: float
+            Maximum distance (in arcseconds) a source may be separated from the edge
+            of the target pixel file.
+
+        Returns
+        -------
+        result : astropy.table
+            Astropy table with the following columns
+            ID : Catalog ID from catalog.
+            RAJ200: Right ascension [degrees] (KIC & EPIC)
+            DEJ2000: Declination [degrees]    (KIC & EPIC)
+            RAJ2015.5: Right ascension [degrees] (Gaia)
+            DEJ2015.5: Declination [degrees] (Gaia)
+            pmRA: Proper motion for right ascension [mas/year]
+            pmDEC: Proper motion for declination [mas/year]
+            Kpmag: Magnitude in Kepler band [mag] (KIC & EPIC)
+            Gmag: Magnitude in Gaia band [mag]  (Gaia)
+
+        """
+
+        if catalog is None:
+            if self.mission == 'Kepler':
+                catalog = 'KIC'
+            elif self.mission == 'K2':
+                catalog = 'EPIC'
+            else:
+                raise ValueError('Please provide a catalog.')
+
+        if dist_tolerance < 2:
+            log.warning('Distance tolerance is too low')
+
+        #Skycoord the centre of target
+        cent = SkyCoord(ra=self.ra, dec=self.dec, frame='icrs', unit=(u.deg, u.deg))
+
+        #Find the size of the TPF
+        radius = ((np.max(self.flux.shape[1:2]) * 4) + dist_tolerance)/ 60.0
+
+        # query around centre with radius
+        data = query_catalog(cent, radius=radius, catalog=catalog)
+
+        # Find where nans are in cadence
+        tpf_mask = np.any(np.isfinite(self.flux), axis=0)
+
+        # Load ra & dec of all tpf pixels
+        pixels_ra, pixels_dec = self.get_coordinates(cadence=int(len(self.cadenceno)/2))
+
+        # Load pixel ra, dec with no nans
+        pixels_radec = np.asarray([pixels_ra[tpf_mask].ravel(), pixels_dec[tpf_mask].ravel()])
+
+        # Make pixel pairs into SkyCoord
+        sky_pixel_pairs = SkyCoord(ra=pixels_radec[0], dec=pixels_radec[1], frame='icrs', unit=(u.deg, u.deg))
+        # Make pairs in sky_sources
+        sky_sources = SkyCoord(ra=data['ra'], dec=data['dec'], frame='icrs', unit=(u.deg, u.deg))
+
+        separation_mask = np.zeros(len(data), dtype=bool)
+        for idx in range (len(data)):
+            s = sky_pixel_pairs.separation(sky_sources[idx])  # Estimate separation
+            separation = np.any(s.arcsec <= dist_tolerance)
+            separation_mask[idx] = separation
+
+        sep_mask = np.array(separation_mask, dtype=bool)
+
+        # Make sure it's bright enough
+        sep_mask &= data['mag'] < magnitude_limit
+
+        return data[sep_mask]
+
+
     def get_prf_model(self):
         """Returns an object of KeplerPRF initialized using the
         necessary metadata in the tpf object.
@@ -834,7 +917,7 @@ class KeplerTargetPixelFile(TargetPixelFile):
         try:
             return self.header(ext=0)['MISSION']
         except KeyError:
-            return None        
+            return None
 
     def aperture_photometry(self, aperture_mask='pipeline'):
         """Returns a LightCurve obtained using aperture photometry.

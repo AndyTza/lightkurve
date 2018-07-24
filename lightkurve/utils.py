@@ -321,3 +321,65 @@ def plot_image(image, ax=None, scale='linear', origin='lower',
     if show_colorbar:
         plt.colorbar(cax, ax=ax, norm=norm, label=clabel)
     return ax
+
+def query_catalog(coordinate, catalog="KIC", radius=0.5):
+        """
+        Returns an astropy table of the sources inside a radius query.
+        Current catalogs supported are KIC, EPIC and Gaia DR2.
+        Parameters
+        -----------
+        coordinate : astropy.coordinates.SkyCoord
+            Coordinate to query around.
+        catalog: 'KIC', 'EPIC', or 'Gaia'
+            Indicate catalog assigned for mission.
+        radius: float
+            Radius of cone search centered on the target in arcminutes.
+            Default radius is 0.5 arcmin.
+        Returns
+        -------
+        result : astropy.table
+            Astropy table with the following columns
+            ID : Catalog ID from catalog.
+            RAJ200: Right ascension [degrees] (KIC & EPIC)
+            DEJ2000: Declination [degrees]    (KIC & EPIC)
+            RAJ2015.5: Right ascension [degrees] (Gaia)
+            DEJ2015.5: Declination [degrees]     (Gaia)
+            pmRA: Proper motion for right ascension [mas/year]
+            pmDEC: Proper motion for declination [mas/year]
+            Kpmag: Magnitude in Kepler band [mag]
+        """
+
+        if catalog is "Gaia":
+            log.warn('Gaia RAs and Decs are at EPOC 2015.5. These RA/Decs have not been corrected.')
+            log.warn('Gaia magnitudes are in Gaia Gmag not KepMag')
+
+        # Vizier id's
+        ID = {"KIC":
+                    {'vizier':"V/133/kic",
+                     'parameters': ["KIC", "RAJ2000", "DEJ2000", "pmRA", "pmDE", "kepmag"]},
+             "EPIC":
+                    {'vizier': "IV/34/epic",
+                     'parameters': ["ID", "RAJ2000", "DEJ2000", "pmRA", "pmDEC", "Kpmag"]},
+             "Gaia":
+                    {'vizier': "I/345/gaia2",
+                     'parameters': ["DR2Name", "RA_ICRS", "DE_ICRS", "pmRA", "pmDE", "Gmag"]}}
+
+        if catalog not in ID.keys():
+            raise ValueError('catalog not one of {}'.format([key for key in ID.keys()]))
+
+        # identifies catalog
+        viz_id = ID[catalog]['vizier']
+
+        # Choose columns from Vizier
+        v = Vizier(catalog=[viz_id], columns=ID[catalog]['parameters'])
+        # query around centre with radius
+        result = v.query_region(coordinate, radius=radius*u.arcmin, catalog=viz_id)
+        if len(result) == 0:
+            log.warning('No sources found in queried region. Try another catalog.')
+
+        # Rename column names
+        new_pars = ['id', 'ra', 'dec', 'pmra', 'pmdec', "mag"]
+        for i in range(len(new_pars)):
+            result[viz_id].rename_column(result[viz_id].colnames[i], new_pars[i])
+
+        return (result[viz_id])
